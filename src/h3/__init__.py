@@ -5,6 +5,7 @@ import base64
 import argparse
 import sys
 import types
+import copy
 from collections import OrderedDict
 from urllib.parse import urlparse
 from aioquic.asyncio import connect
@@ -244,6 +245,16 @@ class CapitalisedHelpFormatter(argparse.HelpFormatter):
     def add_usage(self, usage, actions, groups, prefix=None):
         if prefix is None:
             prefix = 'Usage: '
+        action_usage = []
+        for action in actions:
+            if not action.option_strings:
+                continue
+            action = copy.copy(action)
+            action.option_strings = action.option_strings[:1]
+            formatted = self._format_action_invocation(action)
+            action_usage.append(f'[{formatted}]')
+        usage_actions = ' '.join(action_usage)
+        usage = f'{self._prog} {usage_actions} [method] <url>'
         return super().add_usage(usage, actions, groups, prefix)
     def add_argument(self, action):
         if action.dest == 'url':
