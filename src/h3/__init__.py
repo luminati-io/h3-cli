@@ -240,18 +240,38 @@ async def send_request(host, port, url, method='GET', content=None, headers=None
             raise
 
 
+class CapitalisedHelpFormatter(argparse.HelpFormatter):
+    def add_usage(self, usage, actions, groups, prefix=None):
+        if prefix is None:
+            prefix = 'Usage: '
+        return super().add_usage(usage, actions, groups, prefix)
+    def add_argument(self, action):
+        if action.dest == 'url':
+            action.metavar = 'url (required)'
+        return super().add_argument(action)
+
 def parse_args():
-    parser = argparse.ArgumentParser(description='Make HTTP3 request to a given URL')
+    parser = argparse.ArgumentParser(
+        formatter_class=CapitalisedHelpFormatter,
+        description=(
+            'Python based, CURL-like client that can make HTTP3 request '
+            'to a given URL - including proxy support per RFC 9298. Note that '
+            'this client sends only HTTP3 requests and is not backwards compatible '
+            'with HTTP2/HTTP1.1'
+        )
+    )
+    parser.add_argument('url', type=str,
+        help=(
+            'The URL to which the HTTP3 request will be made. This '
+            'is a required argument. Example: https://example.com. '
+            'The URL scheme must be either "https://" or left '
+            'unspecified, in which case "https://" will be '
+            'automatically added.'
+    ))
     parser.add_argument('method', nargs='?', default='GET',
         help=(
             'The HTTP method to use for the request. The default method is GET. '
             'Other common methods include POST, PUT, DELETE, PATCH, etc.'
-        ))
-    parser.add_argument('url', type=str,
-         help=(
-            'The URL to which the HTTP3 request will be made. This is a required argument. '
-            'Example: https://example.com. The URL scheme must be either "https://" or '
-            'left unspecified, in which case "https://" will be automatically added.'
         ))
     parser.add_argument('-H', dest='headers', action='append',
         help=(
@@ -275,9 +295,9 @@ def parse_args():
     parser.add_argument('--proxy', type=str,
         help=(
             'Specify the HTTP3 proxy server address to use for making the request. '
-            'The proxy should use the CONNECT-UDP protocol, which is compatible with HTTP3 connections. '
+            'The proxy MUST SUPPORT the CONNECT-UDP protocol, which is compatible with HTTP3 connections. '
             'Provide the proxy in the format "hostname:port". '
-            'Example: --proxy "proxy.example.com:8888"'
+            'Example: --proxy "https://proxy.example.com:8888"'
         ))
     parser.add_argument('--proxy-auth', type=str,
         help=(
@@ -286,7 +306,7 @@ def parse_args():
         ))
     parser.add_argument('-k', '--insecure', action='store_true',
         help=(
-            'Skips SSL certificate verification for QUIC connetions. '
+            'Skips SSL certificate verification for QUIC connections. '
             'This is useful when testing with self-signed certificates or untrusted certificate authorities. '
             'Be cautious as this reduces security.'
         ))
