@@ -7,7 +7,7 @@ This is a pip to a given URL. It supports various HTTP methods, customizable hea
 To use the H3 script, ensure that you have Python 3.x installed on your system.
 
 ``` sh
-pip install https://github.com/luminati-io/h3-cli.git
+pip install git+https://github.com/luminati-io/h3-cli.git
 ```
 
 ## Examples
