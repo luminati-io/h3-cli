@@ -1,6 +1,6 @@
 # HTTP3 CLI tool
 
-This is a pip to a given URL. It supports various HTTP methods, customizable headers, request payloads. This tool is primarily designed to work with HTTP/3 MASQUE proxies
+This tool is primarily designed to work with HTTP/3 MASQUE proxies. It supports various HTTP methods, customizable headers, request payloads. 
 
 ## Installation
 
