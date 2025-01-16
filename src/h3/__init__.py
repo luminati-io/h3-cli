@@ -271,6 +271,11 @@ def parse_args():
             'with HTTP2/HTTP1.1'
         )
     )
+    parser.add_argument('method', nargs='?', default='GET',
+        help=(
+            'The HTTP method to use for the request. The default method is GET. '
+            'Other common methods include POST, PUT, DELETE, PATCH, etc.'
+        ))
     parser.add_argument('url', type=str,
         help=(
             'The URL to which the HTTP3 request will be made. This '
@@ -279,11 +284,6 @@ def parse_args():
             'unspecified, in which case "https://" will be '
             'automatically added.'
     ))
-    parser.add_argument('method', nargs='?', default='GET',
-        help=(
-            'The HTTP method to use for the request. The default method is GET. '
-            'Other common methods include POST, PUT, DELETE, PATCH, etc.'
-        ))
     parser.add_argument('-H', dest='headers', action='append',
         help=(
             'HTTP headers to send with the request. '
