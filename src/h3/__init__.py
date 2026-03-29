@@ -1,4 +1,19 @@
 #!/usr/bin/python3
+"""
+h3 — HTTP/3 command-line client.
+
+Entry point: :func:`main` (registered as the ``h3`` console script).
+
+Core async function: :func:`send_request` — opens a QUIC connection and performs
+a single HTTP/3 request, optionally following redirects when ``CONFIG.follow_redirects``
+is set.  All output is written to ``sys.stdout`` (binary via ``sys.stdout.buffer`` for
+the response body, text via ``print()`` for headers and diagnostic messages).
+
+Proxy support uses the MASQUE CONNECT-UDP protocol (:class:`H3ProxyProtocol`).
+
+Global configuration is stored in the :data:`CONFIG` ``argparse.Namespace`` object,
+populated by :func:`main` before ``asyncio.run(send_request(...))`` is called.
+"""
 import asyncio
 import ssl
 import base64
@@ -7,7 +22,7 @@ import sys
 import types
 import copy
 from collections import OrderedDict
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urljoin
 from aioquic.asyncio import connect
 from aioquic.asyncio.protocol import QuicConnectionProtocol
 from aioquic.h3.connection import H3_ALPN, H3Connection
@@ -20,13 +35,16 @@ import aioquic.tls as tls
 
 
 DEFAULT_PORT = 443
+MAX_REDIRECTS = 10
 CONFIG = argparse.Namespace()
 
 
 class Http3ClientError(Exception):
+    """Raised when an HTTP/3 connection is terminated abnormally."""
     pass
 
 def create_quic_configuration():
+    """Build a :class:`QuicConfiguration` from the current :data:`CONFIG` settings."""
     config = QuicConfiguration(is_client=True)
     config.alpn_protocols = H3_ALPN
     if CONFIG.verbose:
@@ -137,6 +155,11 @@ class H3ClientProtocol(QuicConnectionProtocol):
 
 
 class ProxyBadStatus(Http3ClientError):
+    """Raised when the MASQUE proxy responds with a non-200 CONNECT-UDP status.
+
+    Attributes:
+        headers: Response headers dict returned by the proxy.
+    """
     def __init__(self, headers):
         self.headers = headers
 
@@ -216,29 +239,92 @@ class H3ProxyProtocol(H3ClientProtocol):
 
 async def send_request(host, port, url, method='GET', content=None, headers=None,
                        proxy=None, proxy_auth=None):
-    async with connect(
-        host=host,
-        port=port,
-        create_protocol=H3ProxyProtocol if proxy else H3ClientProtocol,
-        configuration=create_quic_configuration(),
-        wait_connected=False
-    ) as client:
-        try:
-            data, headers = await client.send_http_request(url, method, headers, content, proxy, proxy_auth)
-            if CONFIG.show_headers or method == 'HEAD':
-                print("\n".join([f'{k}: {v}' for k, v in headers.items()]))
-            if data:
-                if CONFIG.show_headers:
-                    print()
-                print(data.decode())
-        except ProxyBadStatus as e:
-            print("\n".join([f'{k}: {v}' for k, v in e.headers.items()]))
-            print("Proxy responded with non-200 status")
-        except Http3ClientError as e:
-            print(f"HTTP/3 client error: {e}")
-        except Exception as e:
-            print(f"Unexpected error: {e}")
-            raise
+    """
+    Perform an HTTP/3 request and write the response to stdout.
+
+    Parameters
+    ----------
+    host : str
+        QUIC peer hostname (the proxy host when *proxy* is set, otherwise the
+        target URL hostname).
+    port : int
+        QUIC peer port.
+    url : :class:`urllib.parse.ParseResult`
+        Parsed target URL (always the final destination, even when proxying).
+    method : str
+        HTTP method (default ``'GET'``).  Automatically upper-cased by :func:`main`.
+    content : str or None
+        Request body string.  ``None`` for bodyless requests.
+    headers : dict or None
+        Extra request headers as ``{name: value}`` strings.
+    proxy : :class:`urllib.parse.ParseResult` or None
+        Parsed MASQUE proxy URL.  When set, :class:`H3ProxyProtocol` is used.
+    proxy_auth : str or None
+        Proxy ``username:password`` credential string.
+
+    Redirect following
+    ------------------
+    When ``CONFIG.follow_redirects`` is ``True``, 3xx responses whose ``location``
+    header is present are re-requested automatically:
+
+    - 301 / 302 / 303 → method becomes ``GET``, body is dropped.
+    - 307 / 308 → method and body are preserved.
+    - At most :data:`MAX_REDIRECTS` hops are followed; exceeding this prints an
+      error to ``stderr`` and returns.
+    - Redirects to non-``https://`` URLs are rejected with an error message.
+    """
+    for hop in range(MAX_REDIRECTS + 1):
+        async with connect(
+            host=host,
+            port=port,
+            create_protocol=H3ProxyProtocol if proxy else H3ClientProtocol,
+            configuration=create_quic_configuration(),
+            wait_connected=False
+        ) as client:
+            try:
+                data, resp_headers = await client.send_http_request(url, method, headers, content, proxy, proxy_auth)
+            except ProxyBadStatus as e:
+                print("\n".join([f'{k}: {v}' for k, v in e.headers.items()]))
+                print("Proxy responded with non-200 status")
+                return
+            except Http3ClientError as e:
+                print(f"HTTP/3 client error: {e}")
+                return
+            except Exception as e:
+                print(f"Unexpected error: {e}")
+                raise
+
+        status = resp_headers.get(':status', '')
+        if getattr(CONFIG, 'follow_redirects', False) and status.startswith('3') and 'location' in resp_headers:
+            if hop == MAX_REDIRECTS:
+                print(f"Too many redirects (max {MAX_REDIRECTS})", file=sys.stderr)
+                return
+            location = resp_headers['location']
+            new_url_str = urljoin(url.geturl(), location)
+            new_parsed = urlparse(new_url_str)
+            if new_parsed.scheme != 'https':
+                print(f"Redirect to non-https URL not supported: {new_url_str}", file=sys.stderr)
+                return
+            if CONFIG.verbose:
+                print(f'* Redirecting to: {new_url_str}', file=sys.stderr)
+            url = new_parsed
+            if not proxy:
+                host = url.hostname
+                port = url.port or DEFAULT_PORT
+            if status in ('301', '302', '303'):
+                method = 'GET'
+                content = None
+                if headers and 'content-length' in headers:
+                    del headers['content-length']
+            continue
+
+        if CONFIG.show_headers or method == 'HEAD':
+            print("\n".join([f'{k}: {v}' for k, v in resp_headers.items()]))
+        if data:
+            if CONFIG.show_headers:
+                print()
+            print(data.decode())
+        return
 
 
 class CapitalisedHelpFormatter(argparse.HelpFormatter):
@@ -296,6 +382,13 @@ def parse_args():
             'The request payload (data) to send with the request. '
             'This is typically used for POST, PUT, or PATCH requests to send data in the body. '
             'Example: -d "name=John&age=30"'
+        ))
+    parser.add_argument('-L', '--follow-redirects', action='store_true',
+        help=(
+            'Follow HTTP redirects (3xx responses). '
+            'By default, redirects are not followed. '
+            'This option enables automatic redirect following, up to a maximum of '
+            f'{MAX_REDIRECTS} hops.'
         ))
     parser.add_argument('-i', '--show-headers', action='store_true',
         help=(

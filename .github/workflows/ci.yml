@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.9", "3.11", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install lint deps
+        run: pip install flake8
+
+      - name: Lint
+        run: flake8 src/ tests/ --max-line-length=120 --extend-ignore=E501
+
+      - name: Test
+        run: |
+          python tests/test_send_request.py
+          python tests/test_follow_redirects.py
