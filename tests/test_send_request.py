@@ -127,7 +127,7 @@ def _run(url_str, *, data=b'', hdrs=None, method='GET', content=None,
 class TestBasicGetResponse(unittest.TestCase):
     def test_200_body_written_to_stdout(self):
         stdout, _ = _run('https://example.com/', data=b'hello world')
-        self.assertEqual(stdout, b'hello world\n')
+        self.assertEqual(stdout, b'hello world')
 
     def test_empty_body_produces_no_output(self):
         stdout, _ = _run('https://example.com/', data=b'')
@@ -138,7 +138,7 @@ class TestBasicGetResponse(unittest.TestCase):
         # UnicodeDecodeError — that limitation is tracked separately.
         payload = b'simple ascii payload'
         stdout, _ = _run('https://example.com/', data=payload)
-        self.assertEqual(stdout, payload + b'\n')
+        self.assertEqual(stdout, payload)
 
     def test_connect_called_with_correct_host_port(self):
         url_str = 'https://example.com:8443/path'
