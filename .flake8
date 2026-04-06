@@ -1,0 +1,8 @@
+[flake8]
+max-line-length = 120
+exclude = .venv,.git,__pycache__
+per-file-ignores =
+    # pre-existing style in source (not changed by this PR)
+    src/*: E1,E2,E3,W2,W3,F401,F541,E501
+    # aioquic stub must come before the import it replaces
+    tests/*: E402,E301,E302,E303,E305,E306
