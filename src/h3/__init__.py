@@ -323,7 +323,7 @@ async def send_request(host, port, url, method='GET', content=None, headers=None
         if data:
             if CONFIG.show_headers:
                 print()
-            print(data.decode())
+            sys.stdout.buffer.write(data)
         return
 
 
