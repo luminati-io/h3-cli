@@ -136,11 +136,12 @@ class H3ClientProtocol(QuicConnectionProtocol):
             self._http._check_content_length = types.MethodType(
                 lambda self, stream: None, self._http)
 
+        path = (url.path or '/') + (f'?{url.query}' if url.query else '')
         self.sent_headers = [
             (b':method', method.encode()),
             (b':scheme', b'https'),
             (b':authority', url.hostname.encode()),
-            (b':path', (url.path or '/').encode()),
+            (b':path', path.encode()),
         ] + [(k.encode(), v.encode()) for k, v in (headers or {}).items()]
 
         stream_id = self._quic.get_next_available_stream_id()
