@@ -178,6 +178,28 @@ class TestBasicGetResponse(unittest.TestCase):
         self.assertEqual(calls[0]['port'], 443)
 
 
+class TestRequestHeaders(unittest.TestCase):
+    def test_path_includes_query_string(self):
+        async def run():
+            client = h3mod.H3ClientProtocol.__new__(h3mod.H3ClientProtocol)
+            client._http = MagicMock()
+            client._quic = MagicMock()
+            client._quic.get_next_available_stream_id.return_value = 0
+            client._request_waiter = asyncio.get_running_loop().create_future()
+            client._request_waiter.set_result(True)
+            client.http_response_data = bytearray()
+            client.http_response_headers = {}
+            client.transmit = MagicMock()
+
+            await client.send_http_request(
+                urlparse('https://example.com/check?foo=bar&x=1')
+            )
+            headers = dict(client._http.send_headers.call_args.args[1])
+            self.assertEqual(headers[b':path'], b'/check?foo=bar&x=1')
+
+        asyncio.run(run())
+
+
 # ---------------------------------------------------------------------------
 # Tests: show-headers flag
 # ---------------------------------------------------------------------------
