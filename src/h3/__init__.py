@@ -190,6 +190,14 @@ class H3ProxyProtocol(H3ClientProtocol):
             print(self.__class__.__name__, 'http_event_received', event)
         if isinstance(event, DatagramReceived):
             self.proxy_quic.receive_datagram(event.data[1:], self.proxy_addr, self._loop.time())
+            # Drive the tunneled inner connection the same way aioquic's
+            # QuicConnectionProtocol.datagram_received does: deliver its queued
+            # events and flush/re-arm its timer. Without this the inner connection
+            # only advances on stale timer ticks -- making it crawl and, worse,
+            # letting its idle timer fire spuriously ("Idle timeout").
+            if getattr(self, 'proxy_http', None) is not None:
+                self.proxy_http._process_events()
+                self.proxy_http.transmit()
         elif isinstance(event, HeadersReceived):
             self.http_headers_received(event)
 
