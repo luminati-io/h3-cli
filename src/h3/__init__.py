@@ -89,10 +89,15 @@ class H3ClientProtocol(QuicConnectionProtocol):
         super().__init__(*args, **kwargs)
         self._http = H3Connection(self._quic, True)
         self._request_waiter = self._loop.create_future()
+        self.received_since_wait = False
         self.http_response_headers = OrderedDict()
         self.http_response_data = bytearray()
         if CONFIG.verbose:
             wrap_tls_events(self._quic)
+
+    def datagram_received(self, data, addr):
+        self.received_since_wait = True
+        super().datagram_received(data, addr)
 
     def http_event_received(self, event: H3Event) -> None:
         if CONFIG.debug:
@@ -130,6 +135,20 @@ class H3ClientProtocol(QuicConnectionProtocol):
                 error_message += f': {event.reason_phrase}'
             self._request_waiter.set_exception(Http3ClientError(error_message))
 
+    async def wait_for_response(self, peer):
+        """Give up on a silent peer instead of stalling until the QUIC idle timeout."""
+        timeout = CONFIG.connect_timeout
+        while True:
+            self.received_since_wait = False
+            try:
+                return await asyncio.wait_for(
+                    asyncio.shield(self._request_waiter), timeout)
+            except asyncio.TimeoutError:
+                if not self.received_since_wait:
+                    self._request_waiter.cancel()
+                    raise Http3ClientError(
+                        f'No response from {peer} after {timeout}s')
+
     async def send_http_request(self, url, method='GET', headers=None, content=None, proxy=None, 
                                 proxy_auth=None):
         if method == 'HEAD':
@@ -151,7 +170,7 @@ class H3ClientProtocol(QuicConnectionProtocol):
             self.sent_data = content
             self._http.send_data(stream_id, data=content.encode(), end_stream=True)
         self.transmit()
-        await asyncio.shield(self._request_waiter)
+        await self.wait_for_response(url.hostname)
         return self.http_response_data, self.http_response_headers
 
 
@@ -189,15 +208,8 @@ class H3ProxyProtocol(H3ClientProtocol):
         if CONFIG.debug:
             print(self.__class__.__name__, 'http_event_received', event)
         if isinstance(event, DatagramReceived):
-            self.proxy_quic.receive_datagram(event.data[1:], self.proxy_addr, self._loop.time())
-            # Drive the tunneled inner connection the same way aioquic's
-            # QuicConnectionProtocol.datagram_received does: deliver its queued
-            # events and flush/re-arm its timer. Without this the inner connection
-            # only advances on stale timer ticks -- making it crawl and, worse,
-            # letting its idle timer fire spuriously ("Idle timeout").
-            if getattr(self, 'proxy_http', None) is not None:
-                self.proxy_http._process_events()
-                self.proxy_http.transmit()
+            # the tunneled connection has no real transport, so hand it the datagram directly
+            self.proxy_http.datagram_received(event.data[1:], self.proxy_addr)
         elif isinstance(event, HeadersReceived):
             self.http_headers_received(event)
 
@@ -223,7 +235,7 @@ class H3ProxyProtocol(H3ClientProtocol):
         self.sent_headers = proxy_headers
         self._http.send_headers(stream_id, self.sent_headers, end_stream=False)
         self.transmit()
-        await asyncio.shield(self._request_waiter)
+        await self.wait_for_response(proxy.hostname)
 
         if CONFIG.verbose:
             print('* Request completely sent off')
@@ -428,6 +440,13 @@ def parse_args():
             'Sets the maximum datagram size for QUIC connections. '
             'This can be useful for networks with a small maximum transmission unit (MTU). '
             'The default is 1350 bytes.'
+        ))
+    parser.add_argument('--connect-timeout', default=10.0, type=float,
+        help=(
+            'Seconds to wait for data from the peer before giving up. The timer resets on '
+            'every datagram received, so slow transfers are not interrupted; it only fires when '
+            'the peer goes completely silent, which would otherwise stall until the QUIC idle '
+            'timeout. The default is 10 seconds.'
         ))
     parser.add_argument('-v', '--verbose', action='store_true',
         help=(
