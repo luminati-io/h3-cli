@@ -9,7 +9,6 @@ Run with:  python3 tests/test_binary_output.py
 """
 import sys
 import os
-import types
 import asyncio
 import unittest
 from io import BytesIO, StringIO
@@ -20,31 +19,9 @@ from urllib.parse import urlparse
 # Stub aioquic
 # ---------------------------------------------------------------------------
 
-def _stub(name, **attrs):
-    mod = types.ModuleType(name)
-    for k, v in attrs.items():
-        setattr(mod, k, v)
-    sys.modules[name] = mod
-    return mod
-
-_QuicCfg = type('QuicConfiguration', (), {
-    '__init__': lambda self, **kw: None,
-    'alpn_protocols': None, 'max_datagram_size': 1350,
-    'max_datagram_frame_size': 0, 'verify_mode': None, 'server_name': None,
-})
-
-_stub('aioquic')
-_stub('aioquic.asyncio', connect=MagicMock())
-_stub('aioquic.asyncio.protocol', QuicConnectionProtocol=object)
-_stub('aioquic.h3.connection', H3_ALPN=['h3'], H3Connection=object)
-_stub('aioquic.h3.events',
-      HeadersReceived=object, DataReceived=object,
-      H3Event=object, DatagramReceived=object)
-_stub('aioquic.quic.connection', QuicConnection=object)
-_stub('aioquic.quic.configuration', QuicConfiguration=_QuicCfg)
-_stub('aioquic.quic.events', ConnectionTerminated=object, HandshakeCompleted=object)
-_stub('aioquic.quic.logger', QuicFileLogger=object)
-sys.modules['aioquic'].tls = _stub('aioquic.tls')
+sys.path.insert(0, os.path.dirname(__file__))
+import _aioquic_stub
+_aioquic_stub.install()
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 import h3 as h3mod

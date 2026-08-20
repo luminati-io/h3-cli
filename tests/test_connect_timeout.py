@@ -9,7 +9,6 @@ Run with:  python3 tests/test_connect_timeout.py
 """
 import sys
 import os
-import types
 import asyncio
 import argparse
 import unittest
@@ -18,14 +17,6 @@ from unittest.mock import MagicMock
 # ---------------------------------------------------------------------------
 # Stub aioquic (not installed in dev environment)
 # ---------------------------------------------------------------------------
-
-def _stub(name, **attrs):
-    mod = types.ModuleType(name)
-    for k, v in attrs.items():
-        setattr(mod, k, v)
-    sys.modules[name] = mod
-    return mod
-
 
 class _BaseProtocol:
     """Stand-in for aioquic's QuicConnectionProtocol."""
@@ -54,24 +45,12 @@ class _HeadersReceived:
         self.headers = headers
 
 
-_QuicCfg = type('QuicConfiguration', (), {
-    '__init__': lambda self, **kw: None,
-    'alpn_protocols': None, 'max_datagram_size': 1350,
-    'max_datagram_frame_size': 0, 'verify_mode': None, 'server_name': None,
-})
-
-_stub('aioquic')
-_stub('aioquic.asyncio', connect=MagicMock())
-_stub('aioquic.asyncio.protocol', QuicConnectionProtocol=_BaseProtocol)
-_stub('aioquic.h3.connection', H3_ALPN=['h3'], H3Connection=_H3Connection)
-_stub('aioquic.h3.events',
-      HeadersReceived=_HeadersReceived, DataReceived=object,
-      H3Event=object, DatagramReceived=_DatagramReceived)
-_stub('aioquic.quic.connection', QuicConnection=object)
-_stub('aioquic.quic.configuration', QuicConfiguration=_QuicCfg)
-_stub('aioquic.quic.events', ConnectionTerminated=object, HandshakeCompleted=object)
-_stub('aioquic.quic.logger', QuicFileLogger=object)
-sys.modules['aioquic'].tls = _stub('aioquic.tls')
+sys.path.insert(0, os.path.dirname(__file__))
+import _aioquic_stub
+_aioquic_stub.install(
+    quic_connection_protocol=_BaseProtocol, h3_connection=_H3Connection,
+    headers_received=_HeadersReceived, datagram_received=_DatagramReceived,
+)
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 import h3 as h3mod  # noqa: E402

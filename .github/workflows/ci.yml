@@ -26,7 +26,8 @@ jobs:
 
       - name: Test
         run: |
-          python tests/test_send_request.py
-          python tests/test_follow_redirects.py
-          python tests/test_connect_timeout.py
-          python tests/test_binary_output.py
+          set -e
+          for f in tests/test_*.py; do
+            echo "=== $f ==="
+            python "$f"
+          done
