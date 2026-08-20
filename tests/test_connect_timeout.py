@@ -44,8 +44,9 @@ class _H3Connection:
 
 
 class _DatagramReceived:
-    def __init__(self, data):
+    def __init__(self, data, stream_id=0):
         self.data = data
+        self.stream_id = stream_id
 
 
 class _HeadersReceived:
@@ -170,32 +171,32 @@ class ProxyDatagramPumpTests(unittest.TestCase):
 
     def _proxy(self):
         proxy = h3mod.H3ProxyProtocol(quic=MagicMock())
-        proxy.proxy_http = MagicMock()
-        proxy.proxy_addr = ('example.com', 443)
-        return proxy
+        proxy_http = MagicMock()
+        proxy.tunnels[0] = (proxy_http, ('example.com', 443))
+        return proxy, proxy_http
 
     def test_tunneled_datagram_is_handed_to_the_inner_connection(self):
         async def scenario():
-            proxy = self._proxy()
-            proxy.http_event_received(_DatagramReceived(b'\x00payload'))
-            return proxy
+            proxy, proxy_http = self._proxy()
+            proxy.http_event_received(_DatagramReceived(b'\x00payload', stream_id=0))
+            return proxy, proxy_http
 
-        proxy = asyncio.run(scenario())
+        proxy, proxy_http = asyncio.run(scenario())
         # the context-ID byte is stripped before the inner connection sees it
-        proxy.proxy_http.datagram_received.assert_called_once_with(
+        proxy_http.datagram_received.assert_called_once_with(
             b'payload', ('example.com', 443))
 
     def test_proxy_response_headers_are_still_handled(self):
         async def scenario():
-            proxy = self._proxy()
+            proxy, proxy_http = self._proxy()
             proxy.http_headers_received = MagicMock()
             event = _HeadersReceived([(b':status', b'200')])
             proxy.http_event_received(event)
-            return proxy, event
+            return proxy, proxy_http, event
 
-        proxy, event = asyncio.run(scenario())
+        proxy, proxy_http, event = asyncio.run(scenario())
         proxy.http_headers_received.assert_called_once_with(event)
-        proxy.proxy_http.datagram_received.assert_not_called()
+        proxy_http.datagram_received.assert_not_called()
 
 
 if __name__ == '__main__':

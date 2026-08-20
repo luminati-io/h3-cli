@@ -185,11 +185,11 @@ class TestRequestHeaders(unittest.TestCase):
             client._http = MagicMock()
             client._quic = MagicMock()
             client._quic.get_next_available_stream_id.return_value = 0
-            client._request_waiter = asyncio.get_running_loop().create_future()
-            client._request_waiter.set_result(True)
+            client._loop = asyncio.get_running_loop()
             client.http_response_data = bytearray()
             client.http_response_headers = {}
             client.transmit = MagicMock()
+            client.wait_for_response = AsyncMock(return_value=True)
 
             await client.send_http_request(
                 urlparse('https://example.com/check?foo=bar&x=1')

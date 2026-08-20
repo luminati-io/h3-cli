@@ -99,6 +99,13 @@ class H3ClientProtocol(QuicConnectionProtocol):
         self.received_since_wait = True
         super().datagram_received(data, addr)
 
+    def reset_for_next_request(self):
+        """Reset per-request state so this protocol can send another request."""
+        self._request_waiter = self._loop.create_future()
+        self.received_since_wait = False
+        self.http_response_headers = OrderedDict()
+        self.http_response_data = bytearray()
+
     def http_event_received(self, event: H3Event) -> None:
         if CONFIG.debug:
             print(self.__class__.__name__, 'http_event_received', event)
@@ -151,6 +158,7 @@ class H3ClientProtocol(QuicConnectionProtocol):
 
     async def send_http_request(self, url, method='GET', headers=None, content=None, proxy=None, 
                                 proxy_auth=None):
+        self.reset_for_next_request()
         if method == 'HEAD':
             self._http._check_content_length = types.MethodType(
                 lambda self, stream: None, self._http)
@@ -196,6 +204,11 @@ class HTTPProxiedTransport:
 
 
 class H3ProxyProtocol(H3ClientProtocol):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # maps the CONNECT stream_id to its tunneled (proxy_http, proxy_addr)
+        self.tunnels = {}
+
     def http_headers_received(self, event: HeadersReceived):
         headers = {k.decode(): v.decode() for k, v in event.headers}
         self.http_response_headers = headers
@@ -208,13 +221,17 @@ class H3ProxyProtocol(H3ClientProtocol):
         if CONFIG.debug:
             print(self.__class__.__name__, 'http_event_received', event)
         if isinstance(event, DatagramReceived):
-            # the tunneled connection has no real transport, so hand it the datagram directly
-            self.proxy_http.datagram_received(event.data[1:], self.proxy_addr)
+            tunnel = self.tunnels.get(event.stream_id)
+            if tunnel is not None:
+                proxy_http, proxy_addr = tunnel
+                # the tunneled connection has no real transport, so hand it the datagram directly
+                proxy_http.datagram_received(event.data[1:], proxy_addr)
         elif isinstance(event, HeadersReceived):
             self.http_headers_received(event)
 
     async def send_http_request(self, url, method='GET', headers=None, content=None, proxy=None, 
                                 proxy_auth=None):
+        self.reset_for_next_request()
         if CONFIG.verbose:
             print('* Connecting to proxy')
         stream_id = self._quic.get_next_available_stream_id()
@@ -249,13 +266,14 @@ class H3ProxyProtocol(H3ClientProtocol):
         configuration = create_quic_configuration()
         configuration.max_datagram_size = 1200
         configuration.server_name = url.hostname
-        self.proxy_quic = QuicConnection(configuration=configuration)
-        self.proxy_addr = (url.hostname, url.port or DEFAULT_PORT)
-        self.proxy_quic.connect(self.proxy_addr, self._loop.time())
-        self.proxy_http = H3ClientProtocol(self.proxy_quic)
-        self.proxy_http._transport = HTTPProxiedTransport(self._http, stream_id, self.transmit)
+        proxy_quic = QuicConnection(configuration=configuration)
+        proxy_addr = (url.hostname, url.port or DEFAULT_PORT)
+        proxy_quic.connect(proxy_addr, self._loop.time())
+        proxy_http = H3ClientProtocol(proxy_quic)
+        proxy_http._transport = HTTPProxiedTransport(self._http, stream_id, self.transmit)
+        self.tunnels[stream_id] = (proxy_http, proxy_addr)
 
-        return await self.proxy_http.send_http_request(url, method, headers, content)
+        return await proxy_http.send_http_request(url, method, headers, content)
 
 
 async def send_request(host, port, url, method='GET', content=None, headers=None,
