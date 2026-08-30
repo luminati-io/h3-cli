@@ -323,12 +323,13 @@ async def send_request(host, port, url, method='GET', content=None, headers=None
             try:
                 data, resp_headers = await client.send_http_request(url, method, headers, content, proxy, proxy_auth)
             except ProxyBadStatus as e:
-                print("\n".join([f'{k}: {v}' for k, v in e.headers.items()]))
-                print("Proxy responded with non-200 status")
-                return
+                print("\n".join([f'{k}: {v}' for k, v in e.headers.items()]),
+                      file=sys.stderr)
+                print("Proxy responded with non-200 status", file=sys.stderr)
+                return 1
             except Http3ClientError as e:
-                print(f"HTTP/3 client error: {e}")
-                return
+                print(f"HTTP/3 client error: {e}", file=sys.stderr)
+                return 1
             except Exception as e:
                 print(f"Unexpected error: {e}")
                 raise
@@ -363,7 +364,7 @@ async def send_request(host, port, url, method='GET', content=None, headers=None
             if CONFIG.show_headers:
                 print()
             sys.stdout.buffer.write(data)
-        return
+        return 0
 
 
 class CapitalisedHelpFormatter(argparse.HelpFormatter):
@@ -521,10 +522,12 @@ def main():
     host = proxy.hostname if proxy else url.hostname
     port = proxy.port if proxy else url.port or DEFAULT_PORT
 
-    asyncio.run(send_request(
+    exit_code = asyncio.run(send_request(
         host, port, url, method=args.method, headers=headers,
         content=args.data, proxy=proxy, proxy_auth=args.proxy_auth
     ))
+    if exit_code:
+        sys.exit(exit_code)
 
 
 if __name__ == '__main__':
