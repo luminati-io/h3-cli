@@ -28,3 +28,4 @@ jobs:
         run: |
           python tests/test_send_request.py
           python tests/test_follow_redirects.py
+          python tests/test_binary_output.py
