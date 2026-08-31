@@ -242,16 +242,16 @@ class TestErrorHandling(unittest.TestCase):
     def test_proxy_bad_status_prints_headers_and_message(self):
         bad_hdrs = {':status': '407', 'proxy-authenticate': 'Basic realm="test"'}
         exc = h3mod.ProxyBadStatus(bad_hdrs)
-        stdout, _ = self._run_with_side_effect(exc)
-        text = stdout.decode()
+        _, stderr = self._run_with_side_effect(exc)
+        text = stderr
         self.assertIn(':status: 407', text)
         self.assertIn('Proxy responded with non-200 status', text)
 
     def test_http3_client_error_prints_message(self):
         exc = h3mod.Http3ClientError('Connection terminated: stream reset')
-        stdout, _ = self._run_with_side_effect(exc)
-        self.assertIn('HTTP/3 client error', stdout.decode())
-        self.assertIn('Connection terminated', stdout.decode())
+        _, stderr = self._run_with_side_effect(exc)
+        self.assertIn('HTTP/3 client error', stderr)
+        self.assertIn('Connection terminated', stderr)
 
     def test_unexpected_exception_is_re_raised(self):
         exc = RuntimeError('something unexpected')
